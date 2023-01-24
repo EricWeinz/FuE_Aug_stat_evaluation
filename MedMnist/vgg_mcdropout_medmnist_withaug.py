@@ -33,8 +33,19 @@ from baal.bayesian.dropout import patch_module
 from baal import ModelWrapper
 from baal.utils.metrics import Accuracy
 
-from numpy import load
+from baal.active import get_heuristic, ActiveLearningDataset
+from baal.active.active_loop import ActiveLearningLoop
+from baal.bayesian.dropout import patch_module
+from baal import ModelWrapper
+from baal.utils.metrics import Accuracy
+from baal.active.heuristics import BALD
+from baal.active.heuristics import Entropy
+from baal.active.dataset import ActiveLearningDataset
 
+from numpy import load
+import aug_lib
+import numpy as np
+from baal_extended.ExtendedActiveLearningDataset import ExtendedActiveLearningDataset
 
 import medmnist
 from medmnist import INFO, Evaluator
@@ -81,6 +92,14 @@ def get_datasets(initial_pool, as_rgb, download, python_class):
             transforms.Normalize(3 * [0.5], 3 * [0.5]),
         ]
     )
+    aug_transform = transforms.Compose(
+        [
+            transforms.Resize((32, 32)),
+            aug_lib.TrivialAugment(),
+            transforms.ToTensor(),
+            transforms.Normalize(3 * [0.5], 3 * [0.5]),
+        ]
+    )
     test_transform = transforms.Compose(
         [
             transforms.Resize((32, 32)),
@@ -93,6 +112,10 @@ def get_datasets(initial_pool, as_rgb, download, python_class):
 
     train_ds = datasets.ImageFolder(
         "/home/erwe517e/08_mnist_aug_less_images/datasets/pathmnist/train", transform=transform
+    )
+
+    aug_train_ds = datasets.ImageFolder(
+        "/home/erwe517e/08_mnist_aug_less_images/datasets/pathmnist/train", transform=aug_transform
     )
 
     test_set = datasets.ImageFolder(
@@ -137,11 +160,13 @@ def get_datasets(initial_pool, as_rgb, download, python_class):
     #    ".", train=False, transform=test_transform, target_transform=None, download=True
     # )
 
-    active_set = ActiveLearningDataset(train_ds)
+    #active_set = ActiveLearningDataset(train_ds)
+    eald_set = ExtendedActiveLearningDataset(train_ds)
+    eald_set.augment_n_times(2, augmented_dataset=aug_train_ds)
 
     # We start labeling randomly.
-    active_set.label_randomly(initial_pool)
-    return active_set, test_set
+    eald_set.label_randomly(initial_pool)
+    return eald_set, test_set
 
 
 def main():
@@ -182,7 +207,6 @@ def main():
           "amount augmented images labelled"
         )
       )
-
 
     heuristic = get_heuristic(hyperparams["heuristic"], hyperparams["shuffle_prop"])
     criterion = CrossEntropyLoss()
@@ -266,6 +290,7 @@ def main():
             "amount_labeled_data/next Training set size": active_set.n_labelled
         }
         pprint(logs)
+
         with open(csv_filename, "a+", newline="") as out_file:
             csvwriter = csv.writer(out_file)
             csvwriter.writerow(
